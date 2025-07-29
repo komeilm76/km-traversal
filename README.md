@@ -68,12 +68,11 @@ type Callback = (
 
 ## Condition Types
 
-### 1. Fixed Value
+### 1. Fixed Value (its directly using jaascript or typescript example)
 
 ##### Matches exact property name
-
 ```typescript
-'users.("admin")'; // Matches users.admin
+'users.["admin"]'; // Matches users.admin
 ```
 
 ### 2. Wildcards
