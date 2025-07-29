@@ -1,5 +1,5 @@
-import object from "./object";
+import object from './object';
 
 export default {
-  ...object
+  ...object,
 };
