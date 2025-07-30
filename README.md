@@ -63,7 +63,7 @@ type Callback = (
 
 - **"."** - Path separator (parent.child)
 - **"\*"** - Single-level wildcard (matches any key at current level)
-- **"**"\*\* - Deep wildcard (matches any key at any depth)
+- **"\*\*"** - Deep wildcard (matches any key at any depth)
 - **"(condition)"** - Condition block in JSON format
 
 ## Condition Types
@@ -133,7 +133,7 @@ type Callback = (
 #### **1. Basic Property Access**
 
 ```typescript
-import { customEach } from 'object-traversal-util';
+import { customEach } from 'km-traversall';
 
 const data = {
   users: [
