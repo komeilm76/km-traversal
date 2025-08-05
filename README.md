@@ -121,7 +121,7 @@ type Callback = (
 ##### Uses rules defined in options
 
 ```typescript
-'**.({"rules":["uuid","password"]})';
+'**.({"rules":["uuid","password"]})'; 
 ```
 
 ## Documentation

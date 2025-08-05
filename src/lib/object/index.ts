@@ -1,331 +1,377 @@
-type PatternSegment =
-  | { type: 'fixed'; value: string }
-  | { type: 'wildcard' }
-  | { type: 'doubleWildcard' }
-  | { type: 'uniqs'; value: string[] }
-  | { type: 'range'; from: number; to: number }
-  | {
-      type: 'stringMatch';
-      conditions: {
-        startWith?: string;
-        endWith?: string;
-        includes?: string;
-      };
-    }
-  | { type: 'rules'; ruleNames: string[] };
+/**
+ * Represents entry data that can be an object, array, or nested combination
+ */
+export type IEntryData = object | any[];
 
-type TraverseOptions = {
-  modeOfBehavior: 'modify_entry_object' | 'return_new_object';
-  rules: { name: string; rule: (key: string | number) => boolean }[];
-};
+/**
+ * Represents a single pattern step in the traversal path
+ */
+export type PatternStep =
+  | { type: 'property'; name: string } // Direct property access
+  | { type: 'single-star' } // Iterate all immediate children
+  | { type: 'double-star'; depth?: number } // Recursive descent (optional depth)
+  | { type: 'single-key'; key: string } // Access specific key
+  | { type: 'multi-key'; keys: string[] } // Access multiple specific keys
+  | { type: 'object-cond'; conditions: Record<string, any> } // AND conditions
+  | { type: 'array-cond'; conditions: Record<string, any>[] }; // OR of AND conditions
 
-type Callback = (args: {
+/**
+ * Condition function definition for object/array conditions
+ */
+export interface IJsonPatternCondition {
+  name: string;
+  action: (key: string | number, value: any, target: any, conditionValue: any) => boolean;
+}
+
+/**
+ * Options for customEach function
+ */
+export interface CustomEachOptions {
+  injectedConditions?: IJsonPatternCondition[];
+}
+
+/**
+ * Parameters passed to the callback function
+ */
+export interface CallbackParams {
   key: string | number;
   value: any;
   objectPath: (string | number)[];
   parent: any;
-  setValue: <T>(v: T) => T;
-  setKey: <T extends string | number>(v: T) => T;
-}) => void;
-
-function deepClone<T>(obj: T): T {
-  if (obj === null || typeof obj !== 'object') return obj;
-
-  if (Array.isArray(obj)) {
-    return obj.map(deepClone) as unknown as T;
-  }
-
-  const cloned: Record<string, any> = {};
-  for (const key in obj) {
-    if (Object.prototype.hasOwnProperty.call(obj, key)) {
-      cloned[key] = deepClone(obj[key]);
-    }
-  }
-  return cloned as T;
+  setKey: (newKey: string) => void;
+  setValue: (newValue: any) => void;
 }
 
-function getTraversalKeys(obj: any): string[] {
-  if (obj === null || typeof obj !== 'object') {
-    return [];
-  }
-  if (Array.isArray(obj)) {
-    return Array.from({ length: obj.length }, (_, i) => i.toString());
-  }
-  return Object.keys(obj);
+export type Callback = (params: CallbackParams) => void;
+
+/**
+ * Node state during traversal
+ */
+export interface TraversalNode {
+  node: any;
+  parent: any;
+  key: string | number | null;
+  path: (string | number)[];
 }
 
-function parsePattern(pattern: string): PatternSegment[] {
-  const segments: PatternSegment[] = [];
+/**
+ * Node state for double-star traversal
+ */
+export interface DoubleStarNode extends TraversalNode {
+  depth: number;
+}
+
+/**
+ * Parses a pattern string into structured PatternStep objects
+ */
+function parsePattern(pattern: string): PatternStep[] {
+  const steps: PatternStep[] = [];
   let current = '';
-  let inCondition = false;
-  let parenCount = 0;
-  let conditionContent = '';
+  let depth = 0;
+  let inQuotes = false;
 
   for (let i = 0; i < pattern.length; i++) {
     const char = pattern[i];
 
-    if (char === '(' && !inCondition) {
-      if (current) {
-        segments.push(parseNonConditionSegment(current));
+    if (char === '"' && (i === 0 || pattern[i - 1] !== '\\')) {
+      inQuotes = !inQuotes;
+    }
+
+    if (!inQuotes) {
+      if (char === '(') depth++;
+      if (char === ')') depth--;
+
+      if (char === '.' && depth === 0) {
+        if (current) steps.push(createStep(current));
         current = '';
-      }
-      inCondition = true;
-      parenCount = 1;
-      continue;
-    }
-
-    if (inCondition) {
-      if (char === '(') {
-        parenCount++;
-        conditionContent += char;
-      } else if (char === ')') {
-        parenCount--;
-        if (parenCount === 0) {
-          segments.push(parseCondition(conditionContent));
-          conditionContent = '';
-          inCondition = false;
-          continue;
-        } else {
-          conditionContent += char;
-        }
-      } else {
-        conditionContent += char;
-      }
-    } else {
-      if (char === '.') {
-        if (current) {
-          segments.push(parseNonConditionSegment(current));
-          current = '';
-        }
-      } else {
-        current += char;
+        continue;
       }
     }
+
+    current += char;
   }
 
-  if (inCondition) {
-    throw new Error(`Unterminated condition in pattern: ${pattern}`);
-  }
-
-  if (current) {
-    segments.push(parseNonConditionSegment(current));
-  }
-
-  return segments;
+  if (current) steps.push(createStep(current));
+  return steps;
 }
 
-function parseNonConditionSegment(segment: string): PatternSegment {
-  if (segment === '*') {
-    return { type: 'wildcard' };
-  }
-  if (segment === '**') {
-    return { type: 'doubleWildcard' };
-  }
-  return { type: 'fixed', value: segment };
-}
+function createStep(token: string): PatternStep {
+  if (token.startsWith('(') && token.endsWith(')')) {
+    const content = token.substring(1, token.length - 1).trim();
 
-function parseCondition(condition: string): PatternSegment {
-  try {
-    const conditionObj = JSON.parse(condition);
+    if (content === '*') return { type: 'single-star' };
 
-    if (Array.isArray(conditionObj)) {
-      return { type: 'uniqs', value: conditionObj };
+    const doubleStarMatch = content.match(/^(\d*)\*\*$/);
+    if (doubleStarMatch) {
+      return doubleStarMatch[1]
+        ? { type: 'double-star', depth: parseInt(doubleStarMatch[1]) }
+        : { type: 'double-star' };
     }
 
-    if (typeof conditionObj === 'object' && conditionObj !== null) {
-      if ('uniqs' in conditionObj && Array.isArray(conditionObj.uniqs)) {
-        return { type: 'uniqs', value: conditionObj.uniqs };
-      }
-      if ('from' in conditionObj && 'to' in conditionObj) {
-        return {
-          type: 'range',
-          from: Number(conditionObj.from),
-          to: Number(conditionObj.to),
-        };
-      }
+    if (content.startsWith('"') && content.endsWith('"') && !content.includes(',')) {
+      return { type: 'single-key', key: content.slice(1, -1) };
+    }
 
-      // Handle string matching conditions
-      const stringConditions: {
-        startWith?: string;
-        endWith?: string;
-        includes?: string;
-      } = {};
+    if (
+      content.includes(',') &&
+      content.split(',').every((part) => part.trim().startsWith('"') && part.trim().endsWith('"'))
+    ) {
+      const keys = content.split(',').map((s) => s.trim().slice(1, -1));
+      return { type: 'multi-key', keys };
+    }
 
-      if ('startWith' in conditionObj && typeof conditionObj.startWith === 'string') {
-        stringConditions.startWith = conditionObj.startWith;
-      }
-      if ('endWith' in conditionObj && typeof conditionObj.endWith === 'string') {
-        stringConditions.endWith = conditionObj.endWith;
-      }
-      if ('includes' in conditionObj && typeof conditionObj.includes === 'string') {
-        stringConditions.includes = conditionObj.includes;
-      }
-
-      // Only create stringMatch if at least one condition exists
-      if (Object.keys(stringConditions).length > 0) {
-        return {
-          type: 'stringMatch',
-          conditions: stringConditions,
-        };
-      }
-
-      // Handle rules condition
-      if ('rules' in conditionObj && Array.isArray(conditionObj.rules)) {
-        return {
-          type: 'rules',
-          ruleNames: conditionObj.rules,
-        };
+    if (content.startsWith('{')) {
+      try {
+        return { type: 'object-cond', conditions: JSON.parse(content) };
+      } catch {
+        throw new Error(`Invalid object condition: ${content}`);
       }
     }
 
-    throw new Error(`Invalid condition format: ${condition}`);
-  } catch (e) {
-    throw new Error(
-      `Failed to parse condition: ${condition}. ${e instanceof Error ? e.message : ''}`
-    );
+    if (content.startsWith('[')) {
+      try {
+        return { type: 'array-cond', conditions: JSON.parse(content) };
+      } catch {
+        throw new Error(`Invalid array condition: ${content}`);
+      }
+    }
+
+    throw new Error(`Unrecognized pattern token: ${token}`);
   }
+
+  return { type: 'property', name: token };
 }
 
-function matchesStringConditions(
-  key: string,
-  conditions: {
-    startWith?: string;
-    endWith?: string;
-    includes?: string;
-  }
+function evaluateCondition(
+  cond: string,
+  condValue: any,
+  key: string | number,
+  value: any,
+  injectedConditions: IJsonPatternCondition[] = []
 ): boolean {
-  if (conditions.startWith !== undefined && !key.startsWith(conditions.startWith)) {
-    return false;
-  }
-  if (conditions.endWith !== undefined && !key.endsWith(conditions.endWith)) {
-    return false;
-  }
-  if (conditions.includes !== undefined && !key.includes(conditions.includes)) {
-    return false;
-  }
-  return true;
+  const [prefix, conditionName] = cond.split(':');
+  const negate = prefix.startsWith('!');
+  const cleanConditionName = conditionName == undefined ? prefix : conditionName;
+  const condition = injectedConditions.find((c) => c.name === cleanConditionName);
+  if (!condition) throw new Error(`Condition not found: ${cleanConditionName}`);
+  const target = prefix.endsWith('key') ? key : value;
+  const result = condition.action(key, value, target, condValue);
+  return negate ? !result : result;
 }
 
-function traverse(
-  obj: any,
-  segments: PatternSegment[],
-  index: number,
-  callback: Callback,
-  path: (string | number)[],
-  parent: any,
-  key: string | number | null,
-  options: TraverseOptions
+function customEach(
+  data: IEntryData,
+  options: CustomEachOptions = {},
+  patterns: string[],
+  callbacks: Callback[]
 ): void {
-  if (index === segments.length) {
-    if (key !== null) {
-      const setValue = <T>(newValue: T): T => {
-        if (parent !== null && key !== null) {
-          parent[key] = newValue;
-        }
-        return newValue;
-      };
+  if (patterns.length !== callbacks.length) {
+    throw new Error('Patterns and callbacks must have the same length');
+  }
 
-      const setKey = <T extends string | number>(newKey: T): T => {
-        if (parent !== null && key !== null) {
-          if (Array.isArray(parent)) {
-            throw new Error('setKey is not supported for arrays');
-          }
-          parent[newKey] = parent[key];
-          delete parent[key];
+  patterns.forEach((pattern, index) => {
+    const steps = parsePattern(pattern);
+    const callback = callbacks[index];
+    let currentNodes: TraversalNode[] = [
+      {
+        node: data,
+        parent: null,
+        key: null,
+        path: [],
+      },
+    ];
+
+    for (const step of steps) {
+      const nextNodes: TraversalNode[] = [];
+
+      for (const { node, parent, key, path } of currentNodes) {
+        if (node === null || typeof node !== 'object') continue;
+
+        switch (step.type) {
+          case 'property':
+            if (typeof node === 'object' && step.name in node) {
+              nextNodes.push({
+                node: (node as Record<string, any>)[step.name],
+                parent: node,
+                key: step.name,
+                path: [...path, step.name],
+              });
+            }
+            break;
+
+          case 'single-star':
+            if (Array.isArray(node)) {
+              node.forEach((item, i) =>
+                nextNodes.push({
+                  node: item,
+                  parent: node,
+                  key: i,
+                  path: [...path, i],
+                })
+              );
+            } else if (typeof node === 'object') {
+              Object.entries(node).forEach(([k, v]) =>
+                nextNodes.push({
+                  node: v,
+                  parent: node,
+                  key: k,
+                  path: [...path, k],
+                })
+              );
+            }
+            break;
+
+          case 'double-star':
+            const queue: DoubleStarNode[] = [{ node, parent, key, path, depth: 0 }];
+            while (queue.length > 0) {
+              const { node: curr, parent: p, key: k, path: pth, depth: d } = queue.shift()!;
+
+              nextNodes.push({
+                node: curr,
+                parent: p,
+                key: k,
+                path: pth,
+              });
+
+              if (step.depth !== undefined && d >= step.depth) continue;
+
+              if (curr && typeof curr === 'object') {
+                if (Array.isArray(curr)) {
+                  curr.forEach((item, i) =>
+                    queue.push({
+                      node: item,
+                      parent: curr,
+                      key: i,
+                      path: [...pth, i],
+                      depth: d + 1,
+                    })
+                  );
+                } else {
+                  Object.entries(curr).forEach(([childKey, childValue]) =>
+                    queue.push({
+                      node: childValue,
+                      parent: curr,
+                      key: childKey,
+                      path: [...pth, childKey],
+                      depth: d + 1,
+                    })
+                  );
+                }
+              }
+            }
+            break;
+
+          case 'single-key':
+            if (typeof node === 'object' && step.key in node) {
+              nextNodes.push({
+                node: (node as Record<string, any>)[step.key],
+                parent: node,
+                key: step.key,
+                path: [...path, step.key],
+              });
+            }
+            break;
+
+          case 'multi-key':
+            step.keys.forEach((k) => {
+              if (typeof node === 'object' && k in node) {
+                nextNodes.push({
+                  node: (node as Record<string, any>)[k],
+                  parent: node,
+                  key: k,
+                  path: [...path, k],
+                });
+              }
+            });
+            break;
+
+          case 'object-cond':
+            if (typeof node === 'object') {
+              Object.entries(node).forEach(([childKey, childValue]) => {
+                const satisfies = Object.entries(step.conditions).every(([cond, condValue]) =>
+                  evaluateCondition(
+                    cond,
+                    condValue,
+                    childKey,
+                    childValue,
+                    options.injectedConditions
+                  )
+                );
+
+                if (satisfies) {
+                  nextNodes.push({
+                    node: childValue,
+                    parent: node,
+                    key: childKey,
+                    path: [...path, childKey],
+                  });
+                }
+              });
+            }
+            break;
+
+          case 'array-cond':
+            if (typeof node === 'object') {
+              Object.entries(node).forEach(([childKey, childValue]) => {
+                const satisfies = step.conditions.some((conditionSet) =>
+                  Object.entries(conditionSet).every(([cond, condValue]) =>
+                    evaluateCondition(
+                      cond,
+                      condValue,
+                      childKey,
+                      childValue,
+                      options.injectedConditions
+                    )
+                  )
+                );
+
+                if (satisfies) {
+                  nextNodes.push({
+                    node: childValue,
+                    parent: node,
+                    key: childKey,
+                    path: [...path, childKey],
+                  });
+                }
+              });
+            }
+            break;
         }
-        return newKey;
-      };
+      }
+
+      currentNodes = nextNodes;
+    }
+
+    currentNodes.forEach(({ node, parent, key, path }) => {
+      if (key === null) return; // Skip root node
 
       callback({
-        key,
-        value: obj,
+        key: key,
+        value: node,
         objectPath: path,
         parent,
-        setValue,
-        setKey,
-      });
-    }
-    return;
-  }
-
-  if (obj === null || typeof obj !== 'object') return;
-
-  const segment = segments[index];
-
-  // Handle double wildcard (deep traversal)
-  if (segment.type === 'doubleWildcard') {
-    // Match at current level without advancing pattern
-    traverse(obj, segments, index + 1, callback, path, parent, key, options);
-
-    // Recursively traverse all properties
-    const keys = getTraversalKeys(obj);
-    for (const nextKey of keys) {
-      const nextObj = obj[nextKey];
-      if (nextObj !== null && typeof nextObj === 'object') {
-        const nextPath = [...path, nextKey];
-        traverse(
-          nextObj,
-          segments,
-          index, // Keep same index for doubleWildcard
-          callback,
-          nextPath,
-          obj,
-          nextKey,
-          options
-        );
-      }
-    }
-    return;
-  }
-
-  const keys = getTraversalKeys(obj);
-  let nextKeys: string[] = [];
-
-  if (segment.type === 'fixed') {
-    if (keys.includes(segment.value)) {
-      nextKeys = [segment.value];
-    }
-  } else if (segment.type === 'wildcard') {
-    nextKeys = keys;
-  } else if (segment.type === 'uniqs') {
-    nextKeys = segment.value.filter((k) => keys.includes(k));
-  } else if (segment.type === 'range') {
-    nextKeys = keys.filter((key) => {
-      const n = Number(key);
-      return !isNaN(n) && n >= segment.from && n <= segment.to;
-    });
-  } else if (segment.type === 'stringMatch') {
-    nextKeys = keys.filter((key) => matchesStringConditions(key, segment.conditions));
-  } else if (segment.type === 'rules') {
-    nextKeys = keys.filter((key) => {
-      return segment.ruleNames.some((ruleName) => {
-        const rule = options.rules.find((r) => r.name === ruleName);
-        if (!rule) return false;
-        return rule.rule(key);
+        setKey: (newKey: string) => {
+          if (parent && !Array.isArray(parent)) {
+            (parent as Record<string, any>)[newKey] = node;
+            delete (parent as Record<string, any>)[key as string];
+          } else {
+            throw new Error('Cannot rename array elements or root node');
+          }
+        },
+        setValue: (newValue: any) => {
+          if (parent && key !== null) {
+            if (Array.isArray(parent)) {
+              parent[key as number] = newValue;
+            } else {
+              (parent as Record<string, any>)[key as string] = newValue;
+            }
+          } else {
+            throw new Error('Cannot set value on root node');
+          }
+        },
       });
     });
-  }
-
-  for (const nextKey of nextKeys) {
-    const nextObj = obj[nextKey];
-    const nextPath = [...path, nextKey];
-
-    traverse(nextObj, segments, index + 1, callback, nextPath, obj, nextKey, options);
-  }
-}
-
-export function customEach<T>(
-  obj: T,
-  pattern: string,
-  options: TraverseOptions,
-  callback: Callback
-): T | undefined {
-  const segments = parsePattern(pattern);
-  const workingObj = options.modeOfBehavior === 'return_new_object' ? deepClone(obj) : obj;
-
-  traverse(workingObj, segments, 0, callback, [], null, null, options);
-
-  return options.modeOfBehavior === 'return_new_object' ? workingObj : undefined;
+  });
 }
 
 export default { customEach };
