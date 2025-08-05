@@ -88,7 +88,7 @@ export interface DoubleStarNode extends TraversalNode {
  * Parses pattern string into executable traversal steps
  * @param pattern - Traversal pattern string
  * @returns Array of PatternStep objects
- * 
+ *
  * Pattern Syntax:
  * - Properties: 'user'
  * - Single-star: '(*)'
@@ -97,7 +97,7 @@ export interface DoubleStarNode extends TraversalNode {
  * - Multi-key: '("id","name")'
  * - Object condition: '({"value:startsWith":"a"})'
  * - Array condition: '([{"value:>":5},{"value:<":10}])'
- * 
+ *
  * Example: 'users.(*).contacts.(**).email'
  */
 function parsePattern(pattern: string): PatternStep[] {
@@ -192,7 +192,7 @@ function createStep(token: string): PatternStep {
  * @param value - Current value
  * @param injectedConditions - Custom condition functions
  * @returns Boolean evaluation result
- * 
+ *
  * Condition Syntax:
  * - 'key:conditionName' - Apply to key
  * - 'value:conditionName' - Apply to value
@@ -221,13 +221,13 @@ function evaluateCondition(
  * @param options - Configuration options
  * @param patterns - Array of pattern strings
  * @param callbacks - Corresponding callbacks for each pattern
- * 
+ *
  * Features:
  * - Multiple pattern/callback support
  * - Deep nested traversal
  * - In-memory data modification
  * - Conditional filtering
- * 
+ *
  * Usage:
  * customEach(data, options, patterns, callbacks)
  */
