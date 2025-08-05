@@ -1,4 +1,4 @@
 import lib from './lib';
-import { Callback, IJsonPatternCondition } from './lib/object';
+import { StandardConditions } from './lib/object/v2/conditions';
 const kmTraversal = lib;
 export default kmTraversal;
