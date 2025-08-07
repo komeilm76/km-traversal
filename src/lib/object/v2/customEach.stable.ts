@@ -27,21 +27,18 @@ export type PatternStep =
  * @property name - Unique identifier for the condition (e.g., 'startsWith')
  * @property action - Function that evaluates the condition
  */
-export interface IJsonPatternCondition<NAME extends string = string> {
-  name: NAME;
+export interface IJsonPatternCondition {
+  name: string;
   action: (key: string | number, value: any, target: any, conditionValue: any) => boolean;
 }
+
 /**
  * Configuration options for the customEach function
  * @property injectedConditions - Array of custom condition functions
  */
-type ICustomEachOptions<
-  CONDITIONS extends CONDITION[],
-  CONDITION extends IJsonPatternCondition<NAME>,
-  NAME extends string
-> = {
-  injectedConditions: [...CONDITIONS];
-};
+export interface CustomEachOptions {
+  injectedConditions?: IJsonPatternCondition[];
+}
 
 /**
  * Parameters passed to traversal callbacks
@@ -219,102 +216,6 @@ function evaluateCondition(
   return negate ? !result : result;
 }
 
-const makeConditions = <
-  CONDITION extends IJsonPatternCondition<NAME>,
-  NAME extends string,
-  CONDITIONS extends CONDITION[]
->(
-  conditions: [...CONDITIONS]
-) => {
-  return {
-    conditions,
-    names: conditions.map((i) => {
-      return i.name;
-    }) as [...CONDITION[]][number]['name'][],
-  };
-};
-const defaultConditions = makeConditions([
-  // String operations
-  {
-    name: 'startsWith',
-    action: (_, __, target, conditionValue) =>
-      typeof target === 'string' && target.startsWith(conditionValue),
-  },
-  {
-    name: 'endsWith',
-    action: (_, __, target, conditionValue) =>
-      typeof target === 'string' && target.endsWith(conditionValue),
-  },
-  {
-    name: 'includes',
-    action: (_, __, target, conditionValue) =>
-      typeof target === 'string' && target.includes(conditionValue),
-  },
-  {
-    name: 'matches',
-    action: (_, __, target, conditionValue) =>
-      typeof target === 'string' && new RegExp(conditionValue).test(target),
-  },
-
-  // Numeric comparisons
-  {
-    name: 'greaterThan',
-    action: (_, __, target, conditionValue) =>
-      typeof target === 'number' && target > conditionValue,
-  },
-  {
-    name: 'lessThan',
-    action: (_, __, target, conditionValue) =>
-      typeof target === 'number' && target < conditionValue,
-  },
-  {
-    name: 'between',
-    action: (_, __, target, conditionValue) =>
-      typeof target === 'number' && target >= conditionValue[0] && target <= conditionValue[1],
-  },
-
-  // Equality checks
-  {
-    name: 'equalWith',
-    action: (_, __, target, conditionValue) => target === conditionValue,
-  },
-  {
-    name: 'notEqual',
-    action: (_, __, target, conditionValue) => target !== conditionValue,
-  },
-
-  // Type checking
-  {
-    name: 'isString',
-    action: (_, __, target) => typeof target === 'string',
-  },
-  {
-    name: 'isNumber',
-    action: (_, __, target) => typeof target === 'number',
-  },
-  {
-    name: 'isArray',
-    action: (_, __, target) => Array.isArray(target),
-  },
-  {
-    name: 'isObject',
-    action: (_, __, target) =>
-      typeof target === 'object' && !Array.isArray(target) && target !== null,
-  },
-
-  // Array operations
-  {
-    name: 'arrayIncludes',
-    action: (_, __, target, conditionValue) =>
-      Array.isArray(target) && target.includes(conditionValue),
-  },
-  {
-    name: 'length',
-    action: (_, __, target, conditionValue) =>
-      Array.isArray(target) && target.length === conditionValue,
-  },
-]);
-
 /**
  * Main traversal function for complex data structures
  * @param data - Input data to traverse
@@ -331,30 +232,17 @@ const defaultConditions = makeConditions([
  * Usage:
  * customEach(data, options, patterns, callbacks)
  */
-const customEach: <
-  ENTRY_DATA extends IEntryData,
-  OPTIONS extends ICustomEachOptions<[...CONDITIONS], CONDITION, NAME>,
-  CONDITIONS extends CONDITION[],
-  CONDITION extends IJsonPatternCondition<NAME>,
-  NAME extends string
->(
-  data: ENTRY_DATA,
-  options: OPTIONS,
-  patterns: (
-    | string
-    | ((o: {
-        setCondName: (name: OPTIONS['injectedConditions'][number]['name']) => string;
-      }) => string)
-  )[],
+function customEach(
+  data: IEntryData,
+  options: CustomEachOptions = {},
+  patterns: string[],
   callbacks: Callback[]
-) => void = (data, options, patterns, callbacks) => {
+): void {
   if (patterns.length !== callbacks.length) {
     throw new Error('Patterns and callbacks must have the same length');
   }
 
-  patterns.forEach((_pattern, index) => {
-    const setCondName = (v: string) => v;
-    const pattern = typeof _pattern == 'string' ? _pattern : _pattern({ setCondName });
+  patterns.forEach((pattern, index) => {
     const steps = parsePattern(pattern);
     const callback = callbacks[index];
     let currentNodes: TraversalNode[] = [
@@ -557,29 +445,6 @@ const customEach: <
       });
     });
   });
-};
+}
 
-const adapter = () => {
-  return {
-    register: <
-      CONDITIONS extends CONDITION[],
-      CONDITION extends IJsonPatternCondition<NAME>,
-      NAME extends string
-    >(
-      conditions: CONDITIONS
-    ) => {
-      return {
-        each: <ENTRY_DATA extends IEntryData>(
-          data: ENTRY_DATA,
-          patterns: (
-            | string
-            | ((o: { setCondName: (name: CONDITIONS[number]['name']) => string }) => string)
-          )[],
-          callbacks: Callback[]
-        ) => customEach(data, { injectedConditions: conditions }, patterns, callbacks),
-      };
-    },
-  };
-};
-
-export default { customEach, adapter, defaultConditions: defaultConditions.conditions };
+export default { customEach };
