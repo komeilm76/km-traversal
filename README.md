@@ -189,7 +189,9 @@ const productData = {
 traverseIn(
   productData,
   { injectedConditions: defaultConditions },
-  ['inventory.([{"value.price.lessThan":1000},{"value.tags.arrayIncludes":"electronics"}])'],
+  [
+    'inventory.([{ "key:equalWith":"price", "value.lessThan":1000},{ "key:equalWith":"tags", "value.arrayIncludes":"electronics"}])',
+  ],
   [
     ({ value }) => {
       console.log('Filtered item:', value.title);
@@ -365,7 +367,7 @@ productTraverser.traverseIn(
 ```typescript
 // code...
 // Find active users with phone numbers
-'users.(*).({"value.status.equalWith":"active","value.phone.exists":true})';
+'users.(*).([{"key:equalWith":"status","value.equalWith":"active",},{"equalWith":"phone","value.exists":true}])';
 
 // Find titles containing "urgent" in first 3 levels
 'documents.(*3*).({"key.equalWith":"title","value.includes":"urgent"})';
@@ -474,13 +476,14 @@ traverseIn(
 ```
 
 ## Contributing
+
 #### Contributions are welcome! Please follow these steps:
 
-* Fork the repository
-* Create a feature branch
-* Add tests for new functionality
-* Submit a pull request
+- Fork the repository
+- Create a feature branch
+- Add tests for new functionality
+- Submit a pull request
 
 ## License
-#### MIT License
 
+#### MIT License
