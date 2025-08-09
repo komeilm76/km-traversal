@@ -31,6 +31,13 @@ export interface IJsonPatternCondition<NAME extends string = string> {
   name: NAME;
   action: (key: string | number, value: any, target: any, conditionValue: any) => boolean;
 }
+
+type IPatternShortcust = {
+  singleStar: boolean; // with enable this property , this Syntax Example supported : '*' , usage example : users.*.name
+  doubleStar: boolean; // with enable this property , this Syntax Example supported : '**' , usage example : **.$refs
+  braketScope: boolean; // ignore description abot this
+};
+
 /**
  * Configuration options for the customEach function
  * @property injectedConditions - Array of custom condition functions
@@ -41,6 +48,7 @@ type ICustomEachOptions<
   NAME extends string
 > = {
   injectedConditions: [...CONDITIONS];
+  shortcuts?: IPatternShortcust;
 };
 
 /**
@@ -94,16 +102,22 @@ export interface DoubleStarNode extends TraversalNode {
  *
  * Pattern Syntax:
  * - Properties: 'user'
- * - Single-star: '(*)'
- * - Double-star: '(**)', '(*2*)'
- * - Single-key: '("id")'
- * - Multi-key: '("id","name")'
- * - Object condition: '({"value:startsWith":"a"})'
- * - Array condition: '([{"value:>":5},{"value:<":10}])'
+ * - Single-star: '(*)' , shortcut: '*'
+ * - Double-star: '(**)' , '(*2*)' , shortcut: '*2*' , '**'
+ * - Single-key: '("id")' , (id)
+ * - Multi-key: '("id","name")' , (id,name)
+ * - Object condition: '({"value.startsWith"."a"})' , '({value.startsWith:"a"})'
+ * - Array condition: '([{"value.>":5},{"value.<":10}])' , ([{value.>:5},{value.<:10}])
  *
  * Example: 'users.(*).contacts.(**).email'
+ * Example: `users.(0,"3",'5').contacts.(**).email`
+ * Example: 'users.(*).(contacts).(**).email'
+ * Example: 'users.(*).('contacts',info,"meta").(**).email'
+ * Example: 'users.(*).("contacts").(**).(email,password,phone)'
+ * Example: 'users.(*).("contacts").(**).({key.equalWith:'phone',value:startsWith:"+98"})'
+ * Example: 'users.(*).("contacts").(**).([{key.equalWith:'phone',value:startsWith:"+98"},{key.equalWith:'phone',value:startsWith:"+92"}])'
  */
-function parsePattern(pattern: string): PatternStep[] {
+function parsePattern(pattern: string, options: { shortcuts: IPatternShortcust }): PatternStep[] {
   const steps: PatternStep[] = [];
   let current = '';
   let depth = 0;
@@ -121,7 +135,7 @@ function parsePattern(pattern: string): PatternStep[] {
       if (char === ')') depth--;
 
       if (char === '.' && depth === 0) {
-        if (current) steps.push(createStep(current));
+        if (current) steps.push(createStep(current, options));
         current = '';
         continue;
       }
@@ -130,9 +144,15 @@ function parsePattern(pattern: string): PatternStep[] {
     current += char;
   }
 
-  if (current) steps.push(createStep(current));
+  if (current) steps.push(createStep(current, options));
   return steps;
 }
+
+const isInStringScope = (value: string) => {
+  const isInSingleQute = value.startsWith('"') && value.endsWith('"');
+  const isInDoubleQute = value.startsWith("'") && value.endsWith("'");
+  return { isInDoubleQute, isInSingleQute };
+};
 
 /**
  * Creates a PatternStep from tokenized pattern segment
@@ -140,7 +160,7 @@ function parsePattern(pattern: string): PatternStep[] {
  * @returns Parsed PatternStep
  */
 
-function createStep(token: string): PatternStep {
+function createStep(token: string, options: { shortcuts: IPatternShortcust }): PatternStep {
   if (token.startsWith('(') && token.endsWith(')')) {
     const content = token.substring(1, token.length - 1).trim();
 
@@ -152,18 +172,6 @@ function createStep(token: string): PatternStep {
       return doubleStarMatch[1]
         ? { type: 'double-star', depth: parseInt(doubleStarMatch[1]) }
         : { type: 'double-star' };
-    }
-
-    if (content.startsWith('"') && content.endsWith('"') && !content.includes(',')) {
-      return { type: 'single-key', key: content.slice(1, -1) };
-    }
-
-    if (
-      content.includes(',') &&
-      content.split(',').every((part) => part.trim().startsWith('"') && part.trim().endsWith('"'))
-    ) {
-      const keys = content.split(',').map((s) => s.trim().slice(1, -1));
-      return { type: 'multi-key', keys };
     }
 
     if (content.startsWith('{')) {
@@ -182,7 +190,62 @@ function createStep(token: string): PatternStep {
       }
     }
 
+    if (!content.includes(',') && !content.startsWith('[') && !content.startsWith('{')) {
+      let stringScope = isInStringScope(content);
+      let repairedContent = content;
+      if (stringScope.isInDoubleQute) {
+        repairedContent = content;
+      } else if (stringScope.isInSingleQute) {
+        repairedContent = content.replace("'", '"');
+      } else if (stringScope.isInDoubleQute == false && stringScope.isInSingleQute == false) {
+        repairedContent = `"${content}"`;
+      } else {
+        repairedContent = content.replace("'", '"');
+      }
+      return { type: 'single-key', key: repairedContent.slice(1, -1) };
+    }
+
+    if (
+      content.includes(',') &&
+      !content.startsWith('[') &&
+      !content.startsWith('{')
+      // &&
+      // content.split(',').every((part) => part.trim().startsWith('"') && part.trim().endsWith('"'))
+    ) {
+      const repairedContent = content
+        .split(',')
+        .map((part) => {
+          const trimedPart = part.trim();
+          const stringScope = isInStringScope(trimedPart);
+          if (stringScope.isInDoubleQute) {
+            return part;
+          } else if (stringScope.isInSingleQute) {
+            return part.replace("'", '"');
+          } else if (stringScope.isInDoubleQute == false && stringScope.isInSingleQute == false) {
+            return `"${part}"`;
+          } else {
+            return part.replace("'", '"');
+          }
+        })
+        .join(',');
+
+      const keys = repairedContent.split(',').map((s) => s.trim().slice(1, -1));
+      return { type: 'multi-key', keys };
+    }
+
     throw new Error(`Unrecognized pattern token: ${token}`);
+  }
+  if (options.shortcuts.singleStar == true && token.trim() === '*') {
+    const repairedToken = `(${token})`;
+    return createStep(repairedToken, options);
+  }
+  if (options.shortcuts.doubleStar == true && token.trim() === '**') {
+    const repairedToken = `(${token})`;
+    return createStep(repairedToken, options);
+  }
+  if (options.shortcuts.braketScope && token.trim().startsWith('[') && token.trim().endsWith(']')) {
+    const repairedToken = token.trim().replace('[', '(').replace(']', ')');
+    return createStep(repairedToken, options);
   }
 
   return { type: 'property', name: token };
@@ -190,7 +253,7 @@ function createStep(token: string): PatternStep {
 
 /**
  * Evaluates a condition using injected condition functions
- * @param cond - Condition string (e.g., 'value:startsWith')
+ * @param cond - Condition string (e.g., 'value.startsWith')
  * @param condValue - Value to compare against
  * @param key - Current key
  * @param value - Current value
@@ -198,9 +261,11 @@ function createStep(token: string): PatternStep {
  * @returns Boolean evaluation result
  *
  * Condition Syntax:
- * - 'key:conditionName' - Apply to key
- * - 'value:conditionName' - Apply to value
- * - '!conditionName' - Negate condition
+ * - 'key.conditionName' - Apply to key (in default 'conditionName' === 'key.conditionName')
+ * - '!key.conditionName' - Negate condition Apply to key
+ * - 'value.conditionName' - Apply to value
+ * - '!value.conditionName' - Negate condition Apply to value
+ * - '!conditionName' - Negate condition (in default '!conditionName' === '!key.conditionName')
  */
 function evaluateCondition(
   cond: string,
@@ -331,7 +396,7 @@ const defaultConditions = makeConditions([
  * Usage:
  * customEach(data, options, patterns, callbacks)
  */
-const customEach: <
+const traverseIn: <
   ENTRY_DATA extends IEntryData,
   OPTIONS extends ICustomEachOptions<[...CONDITIONS], CONDITION, NAME>,
   CONDITIONS extends CONDITION[],
@@ -342,20 +407,33 @@ const customEach: <
   options: OPTIONS,
   patterns: (
     | string
+    | string[]
     | ((o: {
         setCondName: (name: OPTIONS['injectedConditions'][number]['name']) => string;
       }) => string)
   )[],
   callbacks: Callback[]
 ) => void = (data, options, patterns, callbacks) => {
+  const defaultShortcuts: IPatternShortcust = {
+    singleStar: true,
+    doubleStar: true,
+    braketScope: false,
+    ...options.shortcuts,
+  };
+
   if (patterns.length !== callbacks.length) {
     throw new Error('Patterns and callbacks must have the same length');
   }
 
   patterns.forEach((_pattern, index) => {
     const setCondName = (v: string) => v;
-    const pattern = typeof _pattern == 'string' ? _pattern : _pattern({ setCondName });
-    const steps = parsePattern(pattern);
+    const pattern =
+      typeof _pattern == 'function'
+        ? _pattern({ setCondName })
+        : typeof _pattern == 'string'
+        ? _pattern
+        : _pattern.join('.');
+    const steps = parsePattern(pattern, { shortcuts: defaultShortcuts });
     const callback = callbacks[index];
     let currentNodes: TraversalNode[] = [
       {
@@ -370,6 +448,8 @@ const customEach: <
       const nextNodes: TraversalNode[] = [];
 
       for (const { node, parent, key, path } of currentNodes) {
+        console.log('step', step);
+
         if (node === null || typeof node !== 'object') continue;
 
         switch (step.type) {
@@ -569,17 +649,17 @@ const adapter = () => {
       conditions: CONDITIONS
     ) => {
       return {
-        each: <ENTRY_DATA extends IEntryData>(
+        traverseIn: <ENTRY_DATA extends IEntryData>(
           data: ENTRY_DATA,
           patterns: (
             | string
             | ((o: { setCondName: (name: CONDITIONS[number]['name']) => string }) => string)
           )[],
           callbacks: Callback[]
-        ) => customEach(data, { injectedConditions: conditions }, patterns, callbacks),
+        ) => traverseIn(data, { injectedConditions: conditions }, patterns, callbacks),
       };
     },
   };
 };
 
-export default { customEach, adapter, defaultConditions: defaultConditions.conditions };
+export default { traverseIn, adapter, defaultConditions: defaultConditions.conditions };

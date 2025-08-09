@@ -1,5 +1,5 @@
-import customEach from './customEach';
+import traverseIn from './traverseIn';
 
 export default {
-  ...customEach,
+  ...traverseIn,
 };
