@@ -13,9 +13,11 @@ kmTraversal.traverseIn(
   x,
   { injectedConditions: [] },
   ['(name,age)'],
-  [({ remove, removeNears }) => {
-    removeNears()
-  }]
+  [
+    ({ remove, removeNears }) => {
+      removeNears();
+    },
+  ]
 );
 
 console.log('x', x);
