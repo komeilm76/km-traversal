@@ -1,6 +1,6 @@
 {
   "name": "km-traversal",
-  "version": "1.1.6-alpha",
+  "version": "1.1.7-beta",
   "description": "This utility provides powerful object traversal capabilities with pattern matching and transformation features.",
   "main": "build/main/index.js",
   "typings": "build/main/index.d.ts",
