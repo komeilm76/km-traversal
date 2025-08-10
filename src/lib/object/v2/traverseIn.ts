@@ -67,6 +67,8 @@ export interface CallbackParams {
   parent: any;
   setKey: (newKey: string) => void;
   setValue: (newValue: any) => void;
+  remove: () => void;
+  removeNears: () => void;
 }
 
 /**
@@ -448,8 +450,6 @@ const traverseIn: <
       const nextNodes: TraversalNode[] = [];
 
       for (const { node, parent, key, path } of currentNodes) {
-        console.log('step', step);
-
         if (node === null || typeof node !== 'object') continue;
 
         switch (step.type) {
@@ -619,6 +619,25 @@ const traverseIn: <
           if (parent && !Array.isArray(parent)) {
             (parent as Record<string, any>)[newKey] = node;
             delete (parent as Record<string, any>)[key as string];
+          } else {
+            throw new Error('Cannot rename array elements or root node');
+          }
+        },
+        remove: () => {
+          if (parent && !Array.isArray(parent)) {
+            delete (parent as Record<string, any>)[key as string];
+          } else {
+            throw new Error('Cannot rename array elements or root node');
+          }
+        },
+        removeNears: () => {
+          if (parent && !Array.isArray(parent)) {
+            const nears = Object.keys(parent).filter((item) => {
+              return item !== key;
+            });
+            nears.forEach((nearKey) => {
+              delete (parent as Record<string, any>)[nearKey as string];
+            });
           } else {
             throw new Error('Cannot rename array elements or root node');
           }

@@ -133,7 +133,9 @@ callback({
   objectPath: (string | number)[], // Full path to node
   parent: any,              // Parent object/array
   setKey: (newKey: string) => void, // Rename property
-  setValue: (newValue: any) => void // Modify value
+  setValue: (newValue: any) => void, // Modify value
+  remove: () => void, // Delete Value
+  removeNears: () => void // Delete Near Values
 })
 ```
 
@@ -348,7 +350,7 @@ productTraverser.traverseIn(
 | :--------------------- | :--------------------------------------- |
 | **users.name**         | Direct property: **data.users.name**     |
 | **items.(\*)**         | All elements in **data.items** array     |
-| \*\*products.(\*\*)    | All nested properties under **products** |
+| **products.(\*\*)**    | All nested properties under **products** |
 | **categories.(\*3\*)** | Recursive search up to 3 levels deep     |
 | **("metadata")**       | Property named "metadata"                |
 | **(id,name)**          | Both "id" and "name" properties          |
